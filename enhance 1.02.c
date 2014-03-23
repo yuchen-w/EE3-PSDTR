@@ -42,6 +42,7 @@
 // Some functions to help with writing/reading the audio ports when using interrupts.
 #include <helper_functions_ISR.h>
 
+
 #define WINCONST 0.85185			/* 0.46/0.54 for Hamming window */
 #define FSAMP 8000.0				/* sample frequency, ensure this matches Config for AIC */
 #define FFTLEN 256					/* fft length = frame length 256/8000 = 32 ms*/
@@ -89,13 +90,16 @@ float *inbuffer, *outbuffer;   		/* Input/output circular buffers */
 float *inframe, *outframe;          /* Input and output frames */
 complex *intermediate_frame;
 complex *interval_frame;					//Frames for processing, stores 2.496s
-complex current_frame;
-complex noise_est;
+double current_frame [OVERSAMP];
+double noise_est [OVERSAMP];
+double G;
 
 
 float *inwin, *outwin;              /* Input and output windows */
 float ingain, outgain;				/* ADC and DAC gains */ 
 float cpufrac; 						/* Fraction of CPU time used */
+float lamda = 0.05;
+
 volatile int io_ptr=0;              /* Input/ouput pointer for circular buffers */
 volatile int frame_ptr=0;           /* Frame pointer */
 volatile int interval_ptr = 0;		//interval (2.5 secs) ptr
@@ -124,7 +128,8 @@ void main()
     
 	intermediate_frame = (complex *) calloc(FFTLEN, sizeof(complex));	/* Processing window */
 	
-	interval_frame = (complex *) calloc(FRAME_LEN*FFTLEN, sizeof(complex))	//Declares a array of FRAME_LEN*FFTLEN (256*4)
+	interval_frame = (complex *) calloc(FRAME_LEN*FFTLEN, sizeof(complex));	//Declares a array of FRAME_LEN*FFTLEN (256*4)
+
 
 	/* initialize board and the audio port */
   	init_hardware();
@@ -186,8 +191,9 @@ void init_HWI(void)
 /******************************** process_frame() ***********************************/  
 void process_frame(void)
 {
-	int k, m; 
+	int i, k, m; 
 	int io_ptr0;   
+	double min_noise_est;
 
 	/* work out fraction of available CPU time used by algorithm */    
 	cpufrac = ((float) (io_ptr & (FRAMEINC - 1)))/FRAMEINC;  
@@ -219,28 +225,44 @@ void process_frame(void)
 		//N-point FFT
 	fft(FFTLEN, intermediate_frame);
 		//noise Estimation
-	//if (k<int(FFTLEN)													//while 2.5s of data hasn't been stored 
-	//{
-		//store intermediate_frame in an array of type complex
-		//interval_frame[FRAME_LEN*interval_ptr+k] = intermediate_frame;		//interval_frame[i][j] = interval_frame[i*n + j] where n = sizeof(j). 2D array stored as a 1D array
-
-		for (i=0; i<FFTLEN/2; i++)
-		{
-			current_frame[interval_ptr] = cabs(intermediate_frame[i]);
-			if (current_frame[k]*current_frame[interval_ptr] < noise_est*noise_est)
-			{
-				noise_est = current_frame;
-			}
-		}
-		
-
-		k++;
-	//}
-	//else
+	for (i=0; i<FFTLEN/2; i++)
 	{
-		//LP filter and calculate noise estimate
-
+		current_frame[i] = cabs(intermediate_frame[i]);
+		if (current_frame[k]*current_frame[k] < noise_est[interval_ptr]*noise_est[interval_ptr])
+			noise_est[interval_ptr] = current_frame[k];
+			
 	}
+		//min-noise out of 4 frames
+	if (noise_est[0] > noise_est[1])
+		min_noise_est = noise_est[1];
+	else
+		min_noise_est = noise_est[0];
+		
+	for (i=2; i<OVERSAMP; i++)
+	{
+		if (min_noise_est > noise_est[i])
+			min_noise_est = noise_est[i-1];
+	}
+		//noise subtraction
+	for (k=0; k<FFTLEN/2; k++)
+	{
+		G = min_noise_est/current_frame[k];
+		if (lamda > G)
+			G = lamda;
+		intermediate_frame[k] = rmul(G,intermediate_frame[k]);
+		intermediate_frame[FFTLEN-k] = 	conjg(intermediate_frame[k]);
+	}
+	
+
+	interval_ptr++;	//increment interval pointer
+	if (interval_ptr > 4)
+	{
+		interval_ptr = 0;	//wrap-around
+	}
+
+	//LP filter and calculate noise estimate
+
+
 	//Spectural subtraction
 	
 	
@@ -250,7 +272,7 @@ void process_frame(void)
 	
 	//2. Low pass filter the noise estimate
 	
-	ifft(FFTLEN, intermediate_frame);	
+	ifft(FFTLEN, intermediate_frame);
 						      	
 	//copy input straigh to output								
     for (k=0;k<FFTLEN;k++)
@@ -258,11 +280,7 @@ void process_frame(void)
 		outframe[k] = intermediate_frame[k].r;/* copy input straight into output */ 
 	} 
 
-	if (interval_ptr++ < 4)	//increment interval pointer
-	else 
-	{
-		interval_ptr = 0;	//wrap-around
-	}
+	
 	
 	/********************************************************************************/
 	
@@ -275,7 +293,7 @@ void process_frame(void)
 	  	outbuffer[m] = outbuffer[m]+outframe[k]*outwin[k];   
 		if (++m >= CIRCBUF) m=0; /* wrap if required */
 	}         
-    for (k<FFTLEN;k++) 
+    for (k=0; k<FFTLEN; k++) 
 	{                           
 		outbuffer[m] = outframe[k]*outwin[k];   /* this loop over-writes outbuffer */        
 	    m++;
