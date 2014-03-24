@@ -277,7 +277,7 @@ void process_frame(void)
 	//copy input straigh to output								
     for (k=0;k<FFTLEN;k++)
 	{                           
-		outframe[k] = intermediate_frame[k].r;/* copy input straight into output */ 
+		outframe[k] = inframe[k];/* copy input straight into output */ 
 	} 
 
 	
