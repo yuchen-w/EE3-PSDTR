@@ -97,8 +97,9 @@ volatile int frame_ptr=0;           /* Frame pointer */
 volatile int interval_ptr=0;
 volatile int M_buffer_ptr=0;
 
-double lamda = 0.05;
-double G;
+float lamda = 0.05;					//minimum noise threshold
+float G;
+float alpha = 4; 					//noise scaling factor
 
 int no_processing_param = FALSE;
 
@@ -231,7 +232,7 @@ void process_frame(void)
 	{
 		no_processing();
 	}
-	if (frame_ptr == )
+	//if (frame_ptr == )
 	
 	/********************************************************************************/
 	
@@ -293,7 +294,7 @@ void basic_processing(void)
 		{
 			G = lamda;
 		}
-		intermediate_frame[k] = rmul(G,intermediate_frame[k]);
+		intermediate_frame[k] = rmul(G*alpha,intermediate_frame[k]);
 		intermediate_frame[FFTLEN-k] = 	conjg(intermediate_frame[k]);
 	}
 
