@@ -56,6 +56,7 @@
 #define PI 3.141592653589793
 #define TFRAME FRAMEINC/FSAMP       /* time between calculation of each frame */
 
+
 /******************************* Global declarations ********************************/
 
 /* Audio port configuration settings: these values set registers in the AIC23 audio 
@@ -82,12 +83,24 @@ DSK6713_AIC23_CodecHandle H_Codec;
 
 float *inbuffer, *outbuffer;   		/* Input/output circular buffers */
 float *inframe, *outframe;          /* Input and output frames */
+
 complex *intermediate_frame;
+float current_frame;
+float min_noise_est;
+float *noise_est;
+
 float *inwin, *outwin;              /* Input and output windows */
 float ingain, outgain;				/* ADC and DAC gains */ 
 float cpufrac; 						/* Fraction of CPU time used */
 volatile int io_ptr=0;              /* Input/ouput pointer for circular buffers */
 volatile int frame_ptr=0;           /* Frame pointer */
+volatile int interval_ptr=0;
+volatile int M_buffer_ptr=0;
+
+double lamda = 0.05;
+double G;
+
+int no_processing_param = FALSE;
 
  /******************************* Function prototypes *******************************/
 void init_hardware(void);    	/* Initialize codec */ 
@@ -95,6 +108,9 @@ void init_HWI(void);            /* Initialize hardware interrupts */
 void ISR_AIC(void);             /* Interrupt service routine for codec */
 void process_frame(void);       /* Frame processing routine */
            
+
+void basic_processing(void);
+void no_processing(void);
 /********************************** Main routine ************************************/
 void main()
 {      
@@ -111,6 +127,7 @@ void main()
     outwin		= (float *) calloc(FFTLEN, sizeof(float));	/* Output window */
 
     intermediate_frame = (complex *) calloc(FFTLEN, sizeof(complex));	/* Processing window */
+    noise_est = (float *) calloc(OVERSAMP*FFTLEN, sizeof(float));	//Noise estimate. 2D array
 	
 	/* initialize board and the audio port */
   	init_hardware();
@@ -194,22 +211,27 @@ void process_frame(void)
     for (k=0;k<FFTLEN;k++)
 	{                           
 		inframe[k] = inbuffer[m] * inwin[k]; 
-		intermediate_frame[k].r = inframe[k];
-		intermediate_frame[k].i = 0; 
 		if (++m >= CIRCBUF) m=0; /* wrap if required */
 	} 
 	
 	/************************* DO PROCESSING OF FRAME  HERE **************************/
 	
-	
-	/* please add your code, at the moment the code simply copies the input to the 
-	ouptut with no processing */	 
-							      	
-										
-    for (k=0;k<FFTLEN;k++)
+	for (k=0;k<FFTLEN;k++)										//TODO: Add this to the for-loop above once all this is finished.
 	{                           
-		outframe[k] = inframe[k];/* copy input straight into output */ 
-	} 
+		intermediate_frame[k].r = inframe[k];
+		intermediate_frame[k].i = 0; 
+	}
+
+	//Note: Processing is only done every time a frame is completely grabbed from the ADC.  
+	if (no_processing_param == FALSE)
+	{
+		basic_processing();
+	}
+	else
+	{
+		no_processing();
+	}
+	if (frame_ptr == )
 	
 	/********************************************************************************/
 	
@@ -248,3 +270,47 @@ void ISR_AIC(void)
 }
 
 /************************************************************************************/
+
+void basic_processing(void)
+{
+	int k;
+	fft(FFTLEN, intermediate_frame);							//n-point FFT
+
+
+	for (k=0; k<FFTLEN/2; k++)									//Find the noise (minimum of fft spectrum). Note: 2nd half of FFT is conjugate of first half
+	{
+		current_frame = cabs(intermediate_frame[k]);
+		if (current_frame < noise_est[interval_ptr*FFTLEN+k])
+		{
+			noise_est[interval_ptr*FFTLEN+k] = current_frame;
+		}
+	}
+
+	for (k=0; k<FFTLEN/2; k++)									//Noise subtraction
+	{
+		G = noise_est[interval_ptr*FFTLEN+k]/cabs(intermediate_frame[k]);			//TODO: Store cabs() in another array to reduce computational load
+		if (lamda > G)
+		{
+			G = lamda;
+		}
+		intermediate_frame[k] = rmul(G,intermediate_frame[k]);
+		intermediate_frame[FFTLEN-k] = 	conjg(intermediate_frame[k]);
+	}
+
+
+	ifft(FFTLEN, intermediate_frame);
+										
+    for (k=0;k<FFTLEN;k++)
+	{                           
+		outframe[k] = intermediate_frame[k].r;/* copy input straight into output */ 
+	} 
+}
+
+void no_processing(void)
+{
+	int k;
+	for (k=0;k<FFTLEN;k++)
+	{                           
+		outframe[k] = inframe[k];/* copy input straight into output */ 
+	} 
+}
