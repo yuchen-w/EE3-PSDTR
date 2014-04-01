@@ -105,18 +105,34 @@ volatile int interval_ptr=0;
 volatile int frame_count=0;
 
 float lamda = 0.1;					//minimum noise threshold
+float lamda_enh4_1;
+float lamda_enh4_2;
+float lamda_enh4_3;
+float SNR_Threshold = 1.2;
+
 float G;
-float alpha = 2; 					//noise scaling factor
+float alpha;
+float alpha_default = 2; 					//noise scaling factor
+float alpha_increment = 2;
 float time_const = 0.04;
 float time_const_enh3 = 0.04;
+float time_const_enh4 = 0.08;
+
 double K_pole;
 double K_pole_enh3;
-
+double K_pole_enh4;
 
 int processing_enable = 1;
 int enhancement1_enable = 1;
 int enhancement2_enable = 0;
 int enhancement3_enable = 0;
+int enhancement4_enable = 0;
+int enhancement5_enable = 0;
+int enhancement6_enable = 1;
+int enhancement7_enable = 0;
+int enhancement8_enable = 0;
+int enhancement9_enable = 0;
+
 
 
  /******************************* Function prototypes *******************************/
@@ -172,7 +188,7 @@ void main()
 	//Initialise K for enhancement1
 
 	K_pole = exp(-TFRAME/time_const);
-	K_pole_enh3 = exp(-TFRAME/time_const_enh3)
+	K_pole_enh3 = exp(-TFRAME/time_const_enh3);
 
   	/* main loop, wait for interrupt */  
   	while(1) 	process_frame();
@@ -308,7 +324,7 @@ void basic_processing(void)
 	{
 		current_sample = cabs(intermediate_frame[k]);
 		
-		if (enhancement1_enable == 1 && enhancement2_enable == 0)
+		if (enhancement1_enable == 1 && enhancement2_enable == 0)	//Enhancement 1&2 - Low pass filter of input
 		{
 			current_sample = (1 - K_pole)*current_sample + K_pole*prev_sample;	
 			prev_sample = current_sample;
@@ -328,7 +344,7 @@ void basic_processing(void)
 
 	prev_sample_enh3 = 0;
 
-	if (enhancement3_enable == 1)
+	if (enhancement3_enable == 1)									//Enhancement 3 - Low pass filter of noise_est
 	{
 		for (k=0; k<FFTLEN; k++)
 		{
@@ -338,15 +354,82 @@ void basic_processing(void)
 		
 	}
 
-
 	for (k=0; k<FFTLEN; k++)										//Noise subtraction
 	{
-		G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);			//TODO: Store cabs() in another array to reduce computational load
+					//TODO: Store cabs() in another array to reduce computational load
+
+		if (enhancement6_enable == 1)								//Enhancement 6 - Increase alpha scale value
+		{
+			if (SNR_Threshold > (cabs(intermediate_frame[k])/min_noise_est[k]))
+			{
+				alpha = alpha_default + alpha_increment; 			
+			}
+		}
+		else
+		{
+			alpha = alpha_default;
+		}
+
+		if(enhancement4_enable == (1||2||3||4))						//Enhancement 4 - 
+		{
+			current_sample = (1 - K_pole_enh4)*current_sample + K_pole_enh4*prev_sample;	
+			prev_sample = current_sample;
+
+			if(enhancement4_enable == 1)
+			{
+				G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
+				lamda_enh4_1 = (lamda*alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
+				
+				if(G < lamda_enh4_1)
+				{
+					G = lamda_enh4_1;
+				}
+			}
+
+			else if(enhancement4_enable == 2)
+			{
+				G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
+				lamda_enh4_2 = lamda*current_sample/cabs(intermediate_frame[k]);
+				
+				if(G < lamda_enh4_2)
+				{
+					G = lamda_enh4_2;
+				}
+			}
+
+			else if(enhancement4_enable == 3)
+			{
+				G = 1 - (alpha*min_noise_est[k])/current_sample;
+				lamda_enh4_3 = (lamda*alpha*min_noise_est[k])/current_sample;
+
+				if(G < lamda_enh4_3)
+				{
+					G = lamda_enh4_3;
+				}
+			}
+
+			else if(enhancement4_enable == 4)
+			{
+				G = 1 - (alpha*min_noise_est[k])/current_sample;
+
+				if(G < lamda)
+				{
+					G = lamda;
+				}
+			}					
+		}
+
+		else if(enhancement5_enable == 1) G = sqrt(1 - (alpha*min_noise_est[k])*(alpha*min_noise_est[k])/(cabs(intermediate_frame[k])*(cabs(intermediate_frame[k]))));			//Enhancement 5
+
+		else G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
+
 		if (G < lamda)
 		{
 			G = lamda;
 		}
-		intermediate_frame[k] 		 = rmul(G,intermediate_frame[k]);
+
+		intermediate_frame[k].r 		 = G*intermediate_frame[k].r;
+		intermediate_frame[k].i 		 = G*intermediate_frame[k].i;
 		//intermediate_frame[FFTLEN-k] = conjg(intermediate_frame[k]);
 	}
 
@@ -396,9 +479,4 @@ void no_processing(void)
 	{                           
 		outframe[k] = inframe[k];/* copy input straight into output */ 
 	} 
-}
-
-void enhancement1(void)
-{
-	
 }
