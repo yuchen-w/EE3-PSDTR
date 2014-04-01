@@ -287,11 +287,11 @@ void process_frame(void)
 	//Note: Processing is only done every time a frame is completely grabbed from the ADC.  
 	if (processing_enable == 1)
 	{
-		basic_processing();
+		basic_processing();											//Where processing takes place
 	}
 	else
 	{
-		no_processing();
+		no_processing();											//No processing takes place
 	}
 
 
@@ -336,16 +336,16 @@ void ISR_AIC(void)
 void basic_processing(void)
 {
 	int k, l;
-	if (enhancement8_enable != 1)
+	if (enhancement8_enable != 1)									//n-point FFT
 	{
-		fft(FFTLEN, intermediate_frame);							//n-point FFT		
+		fft(FFTLEN, intermediate_frame);									
 	}
 	else
 	{
-		fft(FFTLEN, nextFrame);	
+		fft(FFTLEN, nextFrame);										//Perform a delay on the operating buffer to create a next frame buffer and a previous frame buffer
 	}
 
-	for (k=0; k<FFTLEN; k++)									//Find the noise (minimum of fft spectrum). Note: 2nd half of FFT is conjugate of first half
+	for (k=0; k<FFTLEN; k++)										//Find the noise (minimum of fft spectrum). Note: 2nd half of FFT is conjugate of first half
 	{
 		current_sample = cabs(intermediate_frame[k]);
 
@@ -374,7 +374,6 @@ void basic_processing(void)
 	}
 
 	prev_sample_enh3 = 0;
-
 	if (enhancement3_enable == 1)									//Enhancement 3 - Low pass filter of noise_est
 	{
 		for (k=0; k<FFTLEN; k++)
@@ -382,13 +381,10 @@ void basic_processing(void)
 			min_noise_est[k] = (1 - K_pole_enh3)*min_noise_est[k] + K_pole_enh3*prev_sample_enh3;	
 			prev_sample_enh3 = min_noise_est[k];
 		}
-
 	}
 
-	for (k=0; k<FFTLEN; k++)										//Noise subtraction
+	for (k=0; k<FFTLEN; k++)										//Noise subtraction	
 	{
-					//TODO: Store cabs() in another array to reduce computational load
-
 		if (enhancement6_enable == 1)								//Enhancement 6 - Increase alpha scale value
 		{
 			if (SNR_Threshold > (cabs(intermediate_frame[k])/min_noise_est[k]))
@@ -410,7 +406,6 @@ void basic_processing(void)
 			{
 				G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
 				lamda_enh4_1 = (lamda*alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
-
 				if(G < lamda_enh4_1)
 				{
 					G = lamda_enh4_1;
@@ -421,7 +416,6 @@ void basic_processing(void)
 			{
 				G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
 				lamda_enh4_2 = lamda*current_sample/cabs(intermediate_frame[k]);
-
 				if(G < lamda_enh4_2)
 				{
 					G = lamda_enh4_2;
@@ -432,7 +426,6 @@ void basic_processing(void)
 			{
 				G = 1 - (alpha*min_noise_est[k])/current_sample;
 				lamda_enh4_3 = (lamda*alpha*min_noise_est[k])/current_sample;
-
 				if(G < lamda_enh4_3)
 				{
 					G = lamda_enh4_3;
@@ -442,14 +435,12 @@ void basic_processing(void)
 			else if(enhancement4_enable == 4)
 			{
 				G = 1 - (alpha*min_noise_est[k])/current_sample;
-
 				if(G < lamda)
 				{
 					G = lamda;
 				}
 			}					
 		}
-
 		else if(enhancement5_enable == 1) 
 		{
 			G = sqrt(1 - (alpha*min_noise_est[k])*(alpha*min_noise_est[k])/(cabs(intermediate_frame[k])*(cabs(intermediate_frame[k]))));			//Enhancement 5
@@ -457,11 +448,6 @@ void basic_processing(void)
 		else 
 		{
 			G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
-		}
-
-		if (G < lamda)
-		{
-			G = lamda;
 		}
 
 		if (enhancement8_enable == 1)
@@ -474,6 +460,10 @@ void basic_processing(void)
 		} 
 		else 
 		{
+			if (G < lamda)
+			{
+				G = lamda;
+			}
 			intermediate_frame[k].r 		 = G*intermediate_frame[k].r;
 			intermediate_frame[k].i 		 = G*intermediate_frame[k].i;
 			//intermediate_frame[FFTLEN-k] = conjg(intermediate_frame[k]);
