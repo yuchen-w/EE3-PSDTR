@@ -113,7 +113,7 @@ float SNR_Threshold = 1.2;
 float G;
 float alpha;
 float alpha_default = 2; 					//noise scaling factor
-float alpha_increment = 2;
+float alpha_increment = 12;
 float time_const = 0.04;
 float time_const_enh3 = 0.04;
 float time_const_enh4 = 0.08;
