@@ -41,7 +41,6 @@
 
 // Some functions to help with writing/reading the audio ports when using interrupts.
 #include <helper_functions_ISR.h>
-
 #define min(a, b) (((a) < (b)) ? (a) : (b)) 
 
 #define WINCONST 0.85185			/* 0.46/0.54 for Hamming window */
@@ -91,7 +90,9 @@ float *inbuffer, *outbuffer;   		/* Input/output circular buffers */
 float *inframe, *outframe;          /* Input and output frames */
 
 complex *intermediate_frame;
-float current_frame;
+float current_sample;
+float prev_sample = 0;
+float prev_sample_enh3 = 0;
 float *min_noise_est;
 float *noise_est;
 
@@ -105,10 +106,18 @@ volatile int frame_count=0;
 
 float lamda = 0.1;					//minimum noise threshold
 float G;
-float alpha = 14; 					//noise scaling factor
+float alpha = 2; 					//noise scaling factor
+float time_const = 0.04;
+float time_const_enh3 = 0.04;
+double K_pole;
+double K_pole_enh3;
 
-int no_processing_enable = FALSE;
-int enhancement1_enable = FALSE;
+
+int processing_enable = 1;
+int enhancement1_enable = 1;
+int enhancement2_enable = 0;
+int enhancement3_enable = 0;
+
 
  /******************************* Function prototypes *******************************/
 void init_hardware(void);    	/* Initialize codec */ 
@@ -125,6 +134,7 @@ void main()
 {      
 
   	int k, j; // used in various for loops
+  	
   
 /*  Initialize and zero fill arrays */  
 
@@ -154,9 +164,16 @@ void main()
   	ingain=INGAIN;
   	outgain=OUTGAIN;        
 
- 	  for (k=0; k<OVERSAMP; k++)
-  		for (j=0; j<FFTLEN; j++)
-  			noise_est[k*FFTLEN+k] = 9999999999999999;						
+  	//Initialise the M bins
+	for (k=0; k<OVERSAMP; k++)
+		for (j=0; j<FFTLEN; j++)
+			noise_est[k*FFTLEN+k] = 9999999999999999;				
+
+	//Initialise K for enhancement1
+
+	K_pole = exp(-TFRAME/time_const);
+	K_pole_enh3 = exp(-TFRAME/time_const_enh3)
+
   	/* main loop, wait for interrupt */  
   	while(1) 	process_frame();
 }
@@ -234,7 +251,7 @@ void process_frame(void)
 	}
 
 	//Note: Processing is only done every time a frame is completely grabbed from the ADC.  
-	if (no_processing_param == FALSE)
+	if (processing_enable == 1)
 	{
 		basic_processing();
 	}
@@ -243,8 +260,6 @@ void process_frame(void)
 		no_processing();
 	}
 
-	if 
-	//if (frame_ptr == )
 	
 	/********************************************************************************/
 	
@@ -289,37 +304,62 @@ void basic_processing(void)
 	int k, l;
 	fft(FFTLEN, intermediate_frame);							//n-point FFT
 
-
-	for (k=0; k<FFTLEN/2; k++)									//Find the noise (minimum of fft spectrum). Note: 2nd half of FFT is conjugate of first half
+	for (k=0; k<FFTLEN; k++)									//Find the noise (minimum of fft spectrum). Note: 2nd half of FFT is conjugate of first half
 	{
-		current_frame = cabs(intermediate_frame[k]);
-		if (current_frame < noise_est[interval_ptr*FFTLEN+k])
+		current_sample = cabs(intermediate_frame[k]);
+		
+		if (enhancement1_enable == 1 && enhancement2_enable == 0)
 		{
-			noise_est[interval_ptr*FFTLEN+k] = current_frame;
+			current_sample = (1 - K_pole)*current_sample + K_pole*prev_sample;	
+			prev_sample = current_sample;
+		}
+		
+		if (enhancement2_enable == 1)
+		{
+			current_sample = sqrt((1 - K_pole)*current_sample*current_sample + K_pole*prev_sample*prev_sample);	
+			prev_sample = current_sample;
+		}
+
+		if (current_sample < noise_est[(interval_ptr*FFTLEN)+k])
+		{
+			noise_est[interval_ptr*FFTLEN+k] = current_sample;
 		}
 	}
 
+	prev_sample_enh3 = 0;
 
-	for (k=0; k<FFTLEN/2; k++)										//Noise subtraction
+	if (enhancement3_enable == 1)
 	{
-		G = min_noise_est[k]/cabs(intermediate_frame[k]);			//TODO: Store cabs() in another array to reduce computational load
-		if (lamda > G)
+		for (k=0; k<FFTLEN; k++)
+		{
+			min_noise_est[k] = (1 - K_pole_enh3)*min_noise_est[k] + K_pole_enh3*prev_sample_enh3;	
+			prev_sample_enh3 = min_noise_est[k];
+		}
+		
+	}
+
+
+	for (k=0; k<FFTLEN; k++)										//Noise subtraction
+	{
+		G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);			//TODO: Store cabs() in another array to reduce computational load
+		if (G < lamda)
 		{
 			G = lamda;
 		}
-		intermediate_frame[k] 		 = rmul(G*alpha,intermediate_frame[k]);
-		intermediate_frame[FFTLEN-k] = conjg(intermediate_frame[k]);
+		intermediate_frame[k] 		 = rmul(G,intermediate_frame[k]);
+		//intermediate_frame[FFTLEN-k] = conjg(intermediate_frame[k]);
 	}
 
 
 	ifft(FFTLEN, intermediate_frame);
-										
+	
+	//output									
     for (k=0;k<FFTLEN;k++)
 	{                           
-		outframe[k] = intermediate_frame[k].r;/* copy input straight into output */ 
+		outframe[k] = intermediate_frame[k].r;
 	} 
 
-	//Wraparound
+	//Wraparound and comparison of the 4x M bins
 	if (frame_count++ > FRAME_LEN)
 	{
 		frame_count = 0;
@@ -327,17 +367,19 @@ void basic_processing(void)
 		{
 			interval_ptr = 0;
 		}
+		
 		//Reset new bin
-		for (k=0; k<OVERSAMP; k++)
+		for (k=0; k<FFTLEN; k++)
   			noise_est[interval_ptr*FFTLEN+k] = 9999999999999999;
 
-  		//reset min_noise_est
+  		//initialise min_noise_est
   		for (k=0; k<FFTLEN; k++)
 		{
 			min_noise_est[k] = noise_est[k];			//noise_est[0][k]
 		}
+		
 		//Compare M_bins
-		for (k=0; k<FFTLEN/2; k++)
+		for (k=0; k<FFTLEN; k++)
 		{			
 			for (l=0; l<OVERSAMP; l++)
 			{
@@ -358,5 +400,5 @@ void no_processing(void)
 
 void enhancement1(void)
 {
-	//do something here
+	
 }
