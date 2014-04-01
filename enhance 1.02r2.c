@@ -42,6 +42,8 @@
 // Some functions to help with writing/reading the audio ports when using interrupts.
 #include <helper_functions_ISR.h>
 
+#define min(a, b) (((a) < (b)) ? (a) : (b)) 
+
 #define WINCONST 0.85185			/* 0.46/0.54 for Hamming window */
 #define FSAMP 8000.0		/* sample frequency, ensure this matches Config for AIC */
 #define FFTLEN 256					/* fft length = frame length 256/8000 = 32 ms*/
@@ -49,6 +51,10 @@
 #define OVERSAMP 4					/* oversampling ratio (2 or 4) */  
 #define FRAMEINC (FFTLEN/OVERSAMP)	/* Frame increment */
 #define CIRCBUF (FFTLEN+FRAMEINC)	/* length of I/O buffers */
+
+#define BUFFER_LEN	2.5*FSAMP						//2.5 Second buffer
+#define SAMPLING_INTERVAL	FFTLEN/OVERSAMP			//How often data is read from ADC. Should be 64 for 10 second buffer and OVERSAMP of 4
+#define FRAME_LEN (BUFFER_LEN/SAMPLING_INTERVAL)	//Should be 312
 
 #define OUTGAIN 16000.0				/* Output gain for DAC */
 #define INGAIN  (1.0/16000.0)		/* Input gain for ADC  */
@@ -86,7 +92,7 @@ float *inframe, *outframe;          /* Input and output frames */
 
 complex *intermediate_frame;
 float current_frame;
-float min_noise_est;
+float *min_noise_est;
 float *noise_est;
 
 float *inwin, *outwin;              /* Input and output windows */
@@ -95,13 +101,14 @@ float cpufrac; 						/* Fraction of CPU time used */
 volatile int io_ptr=0;              /* Input/ouput pointer for circular buffers */
 volatile int frame_ptr=0;           /* Frame pointer */
 volatile int interval_ptr=0;
-volatile int M_buffer_ptr=0;
+volatile int frame_count=0;
 
-float lamda = 0.05;					//minimum noise threshold
+float lamda = 0.1;					//minimum noise threshold
 float G;
-float alpha = 4; 					//noise scaling factor
+float alpha = 14; 					//noise scaling factor
 
-int no_processing_param = FALSE;
+int no_processing_enable = FALSE;
+int enhancement1_enable = FALSE;
 
  /******************************* Function prototypes *******************************/
 void init_hardware(void);    	/* Initialize codec */ 
@@ -112,11 +119,12 @@ void process_frame(void);       /* Frame processing routine */
 
 void basic_processing(void);
 void no_processing(void);
+void enhancement1(void);
 /********************************** Main routine ************************************/
 void main()
 {      
 
-  	int k; // used in various for loops
+  	int k, j; // used in various for loops
   
 /*  Initialize and zero fill arrays */  
 
@@ -129,7 +137,7 @@ void main()
 
     intermediate_frame = (complex *) calloc(FFTLEN, sizeof(complex));	/* Processing window */
     noise_est = (float *) calloc(OVERSAMP*FFTLEN, sizeof(float));	//Noise estimate. 2D array
-	
+	min_noise_est = (float *) calloc(FFTLEN, sizeof(float));
 	/* initialize board and the audio port */
   	init_hardware();
   
@@ -146,7 +154,9 @@ void main()
   	ingain=INGAIN;
   	outgain=OUTGAIN;        
 
- 							
+ 	  for (k=0; k<OVERSAMP; k++)
+  		for (j=0; j<FFTLEN; j++)
+  			noise_est[k*FFTLEN+k] = 9999999999999999;						
   	/* main loop, wait for interrupt */  
   	while(1) 	process_frame();
 }
@@ -232,6 +242,8 @@ void process_frame(void)
 	{
 		no_processing();
 	}
+
+	if 
 	//if (frame_ptr == )
 	
 	/********************************************************************************/
@@ -274,7 +286,7 @@ void ISR_AIC(void)
 
 void basic_processing(void)
 {
-	int k;
+	int k, l;
 	fft(FFTLEN, intermediate_frame);							//n-point FFT
 
 
@@ -287,15 +299,16 @@ void basic_processing(void)
 		}
 	}
 
-	for (k=0; k<FFTLEN/2; k++)									//Noise subtraction
+
+	for (k=0; k<FFTLEN/2; k++)										//Noise subtraction
 	{
-		G = noise_est[interval_ptr*FFTLEN+k]/cabs(intermediate_frame[k]);			//TODO: Store cabs() in another array to reduce computational load
+		G = min_noise_est[k]/cabs(intermediate_frame[k]);			//TODO: Store cabs() in another array to reduce computational load
 		if (lamda > G)
 		{
 			G = lamda;
 		}
-		intermediate_frame[k] = rmul(G*alpha,intermediate_frame[k]);
-		intermediate_frame[FFTLEN-k] = 	conjg(intermediate_frame[k]);
+		intermediate_frame[k] 		 = rmul(G*alpha,intermediate_frame[k]);
+		intermediate_frame[FFTLEN-k] = conjg(intermediate_frame[k]);
 	}
 
 
@@ -305,6 +318,33 @@ void basic_processing(void)
 	{                           
 		outframe[k] = intermediate_frame[k].r;/* copy input straight into output */ 
 	} 
+
+	//Wraparound
+	if (frame_count++ > FRAME_LEN)
+	{
+		frame_count = 0;
+		if (interval_ptr++ > OVERSAMP)
+		{
+			interval_ptr = 0;
+		}
+		//Reset new bin
+		for (k=0; k<OVERSAMP; k++)
+  			noise_est[interval_ptr*FFTLEN+k] = 9999999999999999;
+
+  		//reset min_noise_est
+  		for (k=0; k<FFTLEN; k++)
+		{
+			min_noise_est[k] = noise_est[k];			//noise_est[0][k]
+		}
+		//Compare M_bins
+		for (k=0; k<FFTLEN/2; k++)
+		{			
+			for (l=0; l<OVERSAMP; l++)
+			{
+				min_noise_est[k] = min(min_noise_est[k], noise_est[l*FFTLEN+k]);
+			}
+		}
+	}
 }
 
 void no_processing(void)
@@ -314,4 +354,9 @@ void no_processing(void)
 	{                           
 		outframe[k] = inframe[k];/* copy input straight into output */ 
 	} 
+}
+
+void enhancement1(void)
+{
+	//do something here
 }
