@@ -107,16 +107,17 @@ volatile int frame_ptr=0;           /* Frame pointer */
 volatile int interval_ptr=0;
 volatile int frame_count=0;
 
-float lamda = 0.1;					//minimum noise threshold
-float lamda_enh4_1;
-float lamda_enh4_2;
-float lamda_enh4_3;
+float lambda = 0.1;					//minimum noise threshold
+float lambda_enh4_1;
+float lambda_enh4_2;
+float lambda_enh4_3;
 float SNR_Threshold = 1.2;
-float NSR_Thresold = 3;
+float NSR_Threshold = 3;
+float SNR;
 
 float G;
 float alpha;
-float alpha_default = 2; 					//noise scaling factor
+float alpha_default = 4; 					//noise scaling factor
 float alpha_increment = 12;
 float time_const = 0.04;
 float time_const_enh3 = 0.04;
@@ -130,9 +131,9 @@ int processing_enable = 1;
 int enhancement1_enable = 1;
 int enhancement2_enable = 0;
 int enhancement3_enable = 0;
-int enhancement4_enable = 0;
+int enhancement4_enable = 3;
 int enhancement5_enable = 0;
-int enhancement6_enable = 1;
+int enhancement6_enable = 0;
 int enhancement7_enable = 0;
 int enhancement8_enable = 0;
 int enhancement9_enable = 0;
@@ -380,12 +381,13 @@ void basic_processing(void)
 			min_noise_est[k] = (1 - K_pole_enh3)*min_noise_est[k] + K_pole_enh3*prev_sample_enh3;	
 			prev_sample_enh3 = min_noise_est[k];
 		}
-		
+
 		//*************Noise subtraction after this point*****************
 
 		if (enhancement6_enable == 1)								//Enhancement 6 - Increase alpha scale value
 		{
-			if (SNR_Threshold > (cabs(intermediate_frame[k])/min_noise_est[k]))
+			SNR = cabs(intermediate_frame[k])/min_noise_est[k];
+			if (SNR_Threshold > (SNR))
 			{
 				alpha = alpha_default + alpha_increment; 			
 			}
@@ -403,39 +405,39 @@ void basic_processing(void)
 			if(enhancement4_enable == 1)
 			{
 				G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
-				lamda_enh4_1 = (lamda*alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
-				if(G < lamda_enh4_1)
+				lambda_enh4_1 = (lambda*alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
+				if(G < lambda_enh4_1)
 				{
-					G = lamda_enh4_1;
+					G = lambda_enh4_1;
 				}
 			}
 
 			else if(enhancement4_enable == 2)
 			{
 				G = 1 - (alpha*min_noise_est[k])/cabs(intermediate_frame[k]);
-				lamda_enh4_2 = lamda*current_sample/cabs(intermediate_frame[k]);
-				if(G < lamda_enh4_2)
+				lambda_enh4_2 = lambda*current_sample/cabs(intermediate_frame[k]);
+				if(G < lambda_enh4_2)
 				{
-					G = lamda_enh4_2;
+					G = lambda_enh4_2;
 				}
 			}
 
 			else if(enhancement4_enable == 3)
 			{
 				G = 1 - (alpha*min_noise_est[k])/current_sample;
-				lamda_enh4_3 = (lamda*alpha*min_noise_est[k])/current_sample;
-				if(G < lamda_enh4_3)
+				lambda_enh4_3 = (lambda*alpha*min_noise_est[k])/current_sample;
+				if(G < lambda_enh4_3)
 				{
-					G = lamda_enh4_3;
+					G = lambda_enh4_3;
 				}
 			}
 
 			else if(enhancement4_enable == 4)
 			{
 				G = 1 - (alpha*min_noise_est[k])/current_sample;
-				if(G < lamda)
+				if(G < lambda)
 				{
-					G = lamda;
+					G = lambda;
 				}
 			}					
 		}
@@ -450,7 +452,7 @@ void basic_processing(void)
 
 		if (enhancement8_enable == 1)
 		{
-			if (min_noise_est[k]/cabs(intermediate_frame[k]) > NSR_Thresold)
+			if (min_noise_est[k]/cabs(intermediate_frame[k]) > NSR_Threshold)
 			{
 				intermediate_frame[k].r = min(prevFrame[k].r,min(intermediate_frame[k].r, nextFrame[k].r));
 				intermediate_frame[k].i = min(prevFrame[k].i,min(intermediate_frame[k].i, nextFrame[k].i));
@@ -458,16 +460,15 @@ void basic_processing(void)
 		} 
 		else 
 		{
-			if (G < lamda)
+			if (G < lambda)
 			{
-				G = lamda;
+				G = lambda;
 			}
 			intermediate_frame[k].r 		 = G*intermediate_frame[k].r;
 			intermediate_frame[k].i 		 = G*intermediate_frame[k].i;
 			//intermediate_frame[FFTLEN-k] = conjg(intermediate_frame[k]);
 		}
 	}
-
 
 	ifft(FFTLEN, intermediate_frame);
 
@@ -481,7 +482,7 @@ void basic_processing(void)
 		prevFrame = intermediate_frame_cpy;
 		intermediate_frame = nextFrame;
 	}
-		
+
 	//Wraparound and comparison of the 4x M bins
 	if (frame_count++ > FRAME_LEN)
 	{
@@ -493,7 +494,7 @@ void basic_processing(void)
 
 		//Reset new bin
 		for (k=0; k<FFTLEN; k++)
-  			noise_est[interval_ptr*FFTLEN+k] = 9999999999999999;
+  			noise_est[interval_ptr*FFTLEN+k] = 2e8;
 
   		//initialise min_noise_est
   		for (k=0; k<FFTLEN; k++)
