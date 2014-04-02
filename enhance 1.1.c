@@ -345,6 +345,8 @@ void basic_processing(void)
 		fft(FFTLEN, nextFrame);										//Perform a delay on the operating buffer to create a next frame buffer and a previous frame buffer
 	}
 
+	prev_sample_enh3 = 0;
+
 	for (k=0; k<FFTLEN; k++)										//Find the noise (minimum of fft spectrum). Note: 2nd half of FFT is conjugate of first half
 	{
 		current_sample = cabs(intermediate_frame[k]);
@@ -371,20 +373,16 @@ void basic_processing(void)
 		{
 			noise_est[interval_ptr*FFTLEN+k] = current_sample;
 		}
-	}
 
-	prev_sample_enh3 = 0;
-	if (enhancement3_enable == 1)									//Enhancement 3 - Low pass filter of noise_est
-	{
-		for (k=0; k<FFTLEN; k++)
+
+		if (enhancement3_enable == 1)									//Enhancement 3 - Low pass filter of noise_est
 		{
 			min_noise_est[k] = (1 - K_pole_enh3)*min_noise_est[k] + K_pole_enh3*prev_sample_enh3;	
 			prev_sample_enh3 = min_noise_est[k];
 		}
-	}
+		
+		//*************Noise subtraction after this point*****************
 
-	for (k=0; k<FFTLEN; k++)										//Noise subtraction	
-	{
 		if (enhancement6_enable == 1)								//Enhancement 6 - Increase alpha scale value
 		{
 			if (SNR_Threshold > (cabs(intermediate_frame[k])/min_noise_est[k]))
@@ -480,14 +478,8 @@ void basic_processing(void)
 	} 
 	if (enhancement8_enable == 1)
 	{
-		for (k=0;k<FFTLEN;k++)
-		{
-			prevFrame[k].r = intermediate_frame_cpy[k].r;
-			prevFrame[k].i = intermediate_frame_cpy[k].i;
-			intermediate_frame[k].r = nextFrame[k].r;
-			intermediate_frame[k].i = nextFrame[k].i;
-		}
-
+		prevFrame = intermediate_frame_cpy;
+		intermediate_frame = nextFrame;
 	}
 		
 	//Wraparound and comparison of the 4x M bins
