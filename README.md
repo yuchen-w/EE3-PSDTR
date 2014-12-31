@@ -1,4 +1,4 @@
-drunken-shame
+EE3 RTDSP
 =============
 
-PSDTR. See what I did there?
+Repository for the RTDSP coursework
