@@ -1,4 +1,4 @@
 EE3 RTDSP
 =============
 
-Repository for the RTDSP coursework
+Repository for the final part of the RTDSP coursework
